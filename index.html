@@ -1198,7 +1198,7 @@
       <div>
         <span class="label">Acesso autorizado</span>
         <h2 class="headline" style="font-size: var(--headline-size); margin-top: var(--space-xs);">Entrar no <strong>Portal Unique</strong></h2>
-        <p class="helper-text" style="margin-top: var(--space-xs);">Informe suas credenciais ou selecione um perfil de demonstração abaixo.</p>
+        <p class="helper-text" style="margin-top: var(--space-xs);">Informe seu e-mail e senha para acessar.</p>
       </div>
 
       <form id="login-form" onsubmit="handleLoginSubmit(event)" style="display: flex; flex-direction: column; gap: var(--space-md);">
@@ -1215,6 +1215,7 @@
           </div>
         </div>
 
+        <div id="login-mode-notice" class="notice-strip is-warning" style="display: none;" role="note">Modo local de teste: os dados ficam somente neste navegador. Não use com informações reais.</div>
         <div id="login-feedback" class="notice-strip" style="display: none;" role="status"></div>
 
         <button type="submit" class="btn btn-primary" style="width: 100%; justify-content: space-between;">
@@ -2243,12 +2244,33 @@
     setInterval(() => { if (!document.hidden) schedulePush(); }, 60000);
     window.addEventListener(`online`, schedulePush);
 
+    /* ===== LOGIN LOCAL DE TESTE (somente quando NÃO há apiBase em config.js) =====
+       Senhas nunca ficam em texto puro: guardamos SHA-256 com sal (e-mail).
+       ATENÇÃO: isto NÃO substitui autenticação no servidor. O hash do usuário de teste
+       está visível no código público; use apenas com dados de exemplo. */
+    const TEST_ADMIN = { name: `Silvana`, email: `silvana@uniquepiscinas.com.br`, passwordHash: `e2793cd48a50dfa7b50f3c356ebeb6758ba81e5177dd86baadfcba8ae2472b61` };
+    async function hashPassword(email, pass) {
+      if (!window.crypto || !window.crypto.subtle) throw new Error(`no-crypto`);
+      const buf = await window.crypto.subtle.digest(`SHA-256`, new TextEncoder().encode(`unique:` + String(email).trim().toLowerCase() + `:` + pass));
+      return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, `0`)).join(``);
+    }
+    function ensureTestAdmin() {
+      if (REMOTE) return;
+      let u = appState.users.find(x => x.email.toLowerCase() === TEST_ADMIN.email);
+      if (!u) {
+        u = { id: `usr-1`, name: TEST_ADMIN.name, email: TEST_ADMIN.email, role: `Administrador`, status: `Ativo`, linkedWorkId: ``, lastAccess: `Nunca acessou` };
+        appState.users.unshift(u);
+      }
+      if (!u.passwordHash) u.passwordHash = TEST_ADMIN.passwordHash;
+      appState.users.forEach(x => { delete x.password; });
+    }
+
     const DEFAULT_USERS = [
       {
         id: `usr-1`,
         name: `Silvana`,
         email: `silvana@uniquepiscinas.com.br`,
-        password: ``,
+        passwordHash: `e2793cd48a50dfa7b50f3c356ebeb6758ba81e5177dd86baadfcba8ae2472b61`,
         role: `Administrador`,
         status: `Ativo`,
         linkedWorkId: ``,
@@ -2258,7 +2280,6 @@
         id: `usr-2`,
         name: `Mauro Rafael`,
         email: `mauro.rafael@gmail.com`,
-        password: ``,
         role: `Administrador`,
         status: `Ativo`,
         linkedWorkId: ``,
@@ -2268,7 +2289,6 @@
         id: `usr-3`,
         name: `Eng. Carlos Mendes`,
         email: `engenharia@uniquepiscinas.com.br`,
-        password: ``,
         role: `Engenheiro/Fiscal`,
         status: `Ativo`,
         linkedWorkId: ``,
@@ -2278,7 +2298,6 @@
         id: `usr-4`,
         name: `Mariana Costa`,
         email: `loja@uniquepiscinas.com.br`,
-        password: ``,
         role: `Operador de Loja`,
         status: `Ativo`,
         linkedWorkId: ``,
@@ -2288,7 +2307,6 @@
         id: `usr-5`,
         name: `Calliny e Maurício`,
         email: `calliny.mauricio@cliente.unique.br`,
-        password: ``,
         role: `Cliente`,
         status: `Ativo`,
         linkedWorkId: `w-calliny`,
@@ -2593,6 +2611,8 @@
         /* Fallback to defaults */
       }
 
+      ensureTestAdmin();
+      if (!REMOTE) { const n = document.getElementById(`login-mode-notice`); if (n) n.style.display = `flex`; }
       if (REMOTE) {
         await remoteResume();
       } else if (appState.currentUserId) {
@@ -2646,42 +2666,24 @@
       el.style.display = `flex`;
     }
 
-    function handleLoginSubmit(event) {
+    async function handleLoginSubmit(event) {
       event.preventDefault();
       const emailEl = document.getElementById(`login-email`);
       const passEl = document.getElementById(`login-password`);
       const email = (emailEl ? emailEl.value : ``).trim().toLowerCase();
       const pass = passEl ? passEl.value : ``;
       if (REMOTE) { remoteLogin(email, pass); return; }
-      showLoginFeedback(`Configure apiBase em config.js para habilitar o login.`, true); return;
 
+      /* Modo local de teste (sem servidor) */
       const user = appState.users.find(u => u.email.toLowerCase() === email);
-      if (!user) {
-        showLoginFeedback(`E-mail não localizado no cadastro de logins do portal.`, true);
-        return;
-      }
+      let ok = false;
+      try { ok = !!user && !!user.passwordHash && (await hashPassword(email, pass)) === user.passwordHash; }
+      catch (e) { showLoginFeedback(`Este navegador não oferece criptografia (use HTTPS ou localhost).`, true); return; }
+      if (!ok) { showLoginFeedback(`E-mail ou senha inválidos.`, true); return; }
       if (user.status !== `Ativo`) {
         showLoginFeedback(`Este acesso está bloqueado. Solicite liberação a um Administrador.`, true);
         return;
       }
-      if (user.password !== pass) {
-        showLoginFeedback(`Senha incorreta. Confira a senha cadastrada ou utilize o acesso rápido.`, true);
-        return;
-      }
-
-      user.lastAccess = formatNowDateTime();
-      appState.currentUserId = user.id;
-      persistState();
-      enterPortal(user);
-    }
-
-    function quickLogin(email) {
-      const user = appState.users.find(u => u.email.toLowerCase() === email.toLowerCase());
-      if (!user) return;
-      const emailEl = document.getElementById(`login-email`);
-      const passEl = document.getElementById(`login-password`);
-      if (emailEl) emailEl.value = user.email;
-      if (passEl) passEl.value = user.password;
       user.lastAccess = formatNowDateTime();
       appState.currentUserId = user.id;
       persistState();
@@ -3983,11 +3985,13 @@
       const editId = document.getElementById(`um-edit-id`);
       const title = document.getElementById(`um-form-title`);
       if (editId) editId.value = ``;
+      const pw = document.getElementById(`um-password`);
+      if (pw) { pw.required = true; pw.placeholder = `Digite ou gere uma senha`; }
       if (title) title.innerHTML = `Cadastrar <strong>Login &amp; Senha</strong>`;
       toggleClientWorkField();
     }
 
-    function handleSaveUser(event) {
+    async function handleSaveUser(event) {
       event.preventDefault();
       if (getCurrentUser().role !== `Administrador`) {
         showToast(`Somente Administradores podem criar ou alterar logins e senhas.`, `error`);
@@ -4003,27 +4007,44 @@
       const linkedWorkId = role === `Cliente` ? document.getElementById(`um-client-work`).value : ``;
       if (REMOTE) { remoteSaveUser({ id: editId, name, email, role, status, password, linkedWorkId }); return; }
 
+      if (!name) { showToast(`Informe o nome completo.`, `error`); return; }
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { showToast(`Informe um e-mail válido.`, `error`); return; }
+      if (role === `Cliente` && !linkedWorkId) { showToast(`Vincule o cliente a uma obra.`, `error`); return; }
+      if (!editId && password.length < 6) { showToast(`Senha com no mínimo 6 caracteres.`, `error`); return; }
+      if (editId && password && password.length < 6) { showToast(`Senha com no mínimo 6 caracteres (ou deixe em branco para manter a atual).`, `error`); return; }
+      if (appState.users.some(u => u.id !== editId && u.email.toLowerCase() === email)) {
+        showToast(`Já existe um usuário cadastrado com o e-mail ${email}.`, `error`);
+        return;
+      }
+      let passwordHash = ``;
+      try { if (password) passwordHash = await hashPassword(email, password); }
+      catch (e) { showToast(`Este navegador não oferece criptografia (use HTTPS ou localhost).`, `error`); return; }
+
       if (editId) {
         const existing = appState.users.find(u => u.id === editId);
         if (existing) {
+          const activeAdmins = appState.users.filter(u => u.role === `Administrador` && u.status === `Ativo` && u.id !== editId).length;
+          if (existing.role === `Administrador` && (role !== `Administrador` || status !== `Ativo`) && activeAdmins === 0) {
+            showToast(`É preciso manter pelo menos um Administrador ativo.`, `error`);
+            return;
+          }
+          const emailChanged = existing.email.toLowerCase() !== email;
           existing.name = name;
           existing.email = email;
           existing.role = role;
           existing.status = status;
-          existing.password = password;
           existing.linkedWorkId = linkedWorkId;
+          /* Se o e-mail mudou, o hash antigo (com sal do e-mail) deixa de valer: exige nova senha. */
+          if (passwordHash) existing.passwordHash = passwordHash;
+          else if (emailChanged) { existing.passwordHash = ``; showToast(`E-mail alterado: defina uma nova senha para este usuário.`, `warning`); }
         }
         showToast(`Credenciais de "${name}" atualizadas.`, `success`);
       } else {
-        if (appState.users.some(u => u.email.toLowerCase() === email)) {
-          showToast(`Já existe um usuário cadastrado com o e-mail ${email}.`, `error`);
-          return;
-        }
         appState.users.push({
           id: `usr-${Date.now()}`,
           name,
           email,
-          password,
+          passwordHash,
           role,
           status,
           linkedWorkId,
@@ -4045,8 +4066,9 @@
       document.getElementById(`um-email`).value = u.email;
       document.getElementById(`um-role`).value = u.role;
       document.getElementById(`um-status`).value = u.status;
-      document.getElementById(`um-password`).value = REMOTE ? `` : u.password;
-      if (REMOTE) document.getElementById(`um-password`).required = false;
+      document.getElementById(`um-password`).value = ``;
+      document.getElementById(`um-password`).required = false;
+      document.getElementById(`um-password`).placeholder = `Deixe em branco para manter a senha atual`;
       toggleClientWorkField();
       if (u.linkedWorkId) document.getElementById(`um-client-work`).value = u.linkedWorkId;
       document.getElementById(`um-form-title`).innerHTML = `Editar <strong>${escapeHtml(u.name)}</strong>`;
