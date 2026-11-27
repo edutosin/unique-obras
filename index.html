@@ -1232,7 +1232,7 @@
     document.getElementById("filtroBuscaObra").addEventListener("input", renderObrasTable);
     document.getElementById("filtroStatusObra").addEventListener("change", renderObrasTable);
 
-    window.openInspecao = function (obraId) {
+    function openInspecao(obraId) {
       const o = state.obras.find((x) => x.id === obraId);
       if (!o) return;
       state.selectedObraId = o.id;
@@ -1243,7 +1243,8 @@
       document.getElementById("inspEtapa").value = o.etapa;
       document.getElementById("inspAvanco").value = o.avanco;
       document.getElementById("inspStatus").value = o.status;
-    };
+    }
+    window.openInspecao = openInspecao;
 
     document.getElementById("fecharInspecaoBtn").addEventListener("click", () => {
       document.getElementById("inspecaoPanel").style.display = "none";
@@ -1406,10 +1407,11 @@
       reader.readAsDataURL(file);
     });
 
-    window.fillIaShortcut = function (text) {
+    function fillIaShortcut(text) {
       document.getElementById("iaQuestion").value = text;
       document.getElementById("iaQuestion").focus();
-    };
+    }
+    window.fillIaShortcut = fillIaShortcut;
 
     document.getElementById("iaForm").addEventListener("submit", async (e) => {
       e.preventDefault();
@@ -1532,14 +1534,15 @@
       showToast("Ocorrência registrada.");
     });
 
-    window.toggleNcStatus = function (idx) {
+    function toggleNcStatus(idx) {
       const item = state.ocorrencias[idx];
       if (!item) return;
       item.status = item.status === "Resolvida" ? "Aberta" : "Resolvida";
       saveState();
       renderFinanceiro();
       renderKPIsAndCharts();
-    };
+    }
+    window.toggleNcStatus = toggleNcStatus;
 
     document.getElementById("excelFileInput").addEventListener("change", (e) => {
       const file = e.target.files[0];
