@@ -1,39 +1,14 @@
-const CACHE_NAME = "unique-obras-v1.1.0";
-const ASSETS = [
-  "./",
-  "./index.html",
-  "./config.js",
-  "./manifest.webmanifest",
-  "./icon-192.png",
-  "./icon-512.png"
-];
-
-self.addEventListener("install", (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS)).then(() => self.skipWaiting())
-  );
-});
-
-self.addEventListener("activate", (event) => {
-  event.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
-    ).then(() => self.clients.claim())
-  );
-});
-
-self.addEventListener("fetch", (event) => {
-  if (event.request.method !== "GET") return;
-  const url = new URL(event.request.url);
-  if (url.origin !== location.origin) return;
-
-  event.respondWith(
-    fetch(event.request)
-      .then((res) => {
-        const copy = res.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
-        return res;
-      })
-      .catch(() => caches.match(event.request))
-  );
+const V = 'unique-v2'; // aumente a cada publicação para forçar atualização
+const SHELL = ['./', 'index.html', 'config.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png'];
+self.addEventListener('install', e => e.waitUntil(caches.open(V).then(c => c.addAll(SHELL)).catch(() => {})));
+self.addEventListener('activate', e => e.waitUntil(caches.keys().then(k => Promise.all(k.filter(x => x !== V).map(x => caches.delete(x)))).then(() => self.clients.claim())));
+self.addEventListener('message', e => { if (e.data === 'SKIP_WAITING') self.skipWaiting(); });
+self.addEventListener('fetch', e => {
+  const r = e.request;
+  if (r.method !== 'GET' || r.url.includes('/api/')) return;
+  e.respondWith(caches.open(V).then(async c => {
+    const hit = await c.match(r);
+    const net = fetch(r).then(res => { if (res.ok || res.type === 'opaque') c.put(r, res.clone()); return res; }).catch(() => hit);
+    return hit || net;
+  }));
 });
